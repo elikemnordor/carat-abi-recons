@@ -410,7 +410,7 @@ def excel_recons(data):
     sheet['G13'] = data.get('ghc', 0)
     
     # Save the workbook with a new name based on the dictionary values
-    filename = f"{data.get('brand', 'Unknown')}_{data.get('item_line', 'Unknown')}_{data.get('platform', 'Unknown')}_Recons.xlsx"
+    filename = f"{data.get('brand', 'Unknown')}_{data.get('item_line', 'Unknown')}_{data.get('platform', 'Unknown')}_{data.get('invoice_no', 'UnknownInv')}_Recons.xlsx"
     filename = sanitize_filename(filename)
     workbook.save(filename)
     
@@ -510,7 +510,7 @@ def main():
             excel_recons(result)  # This saves the file directly
             
             sanitized_item_line = sanitize_filename(result.get('item_line', 'Unknown'))
-            excel_file_name = f"{result.get('brand', 'Unknown')}_{sanitized_item_line}_{result.get('platform', 'Unknown')}_Recons.xlsx"            
+            excel_file_name = f"{result.get('brand', 'Unknown')}_{sanitized_item_line}_{result.get('platform', 'Unknown')}_{result.get('invoice_no', 'UnknownInv')}_Recons.xlsx"            
             # Now, read the saved Excel file into memory
             try:
                 with open(excel_file_name, "rb") as excel_file:
