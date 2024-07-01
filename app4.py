@@ -15,6 +15,9 @@ from openpyxl.styles import Alignment, Border, Side,Font, PatternFill, NamedStyl
 import streamlit as st
 import base64
 from io import BytesIO
+import os
+import tempfile
+from llama_parse import LlamaParse #META LLAMA
 
 def get_platform_type(text):
     #Entra
@@ -24,7 +27,10 @@ def get_platform_type(text):
         return "Twitter"
     
     elif "eskimi pte limited" in text.lower():
-        return "Eskimi"  
+        return "Eskimi"
+
+    elif "meta platforms ireland limited" in text.lower():
+        return "Meta"        
     
     else:
         return "Unrecognizable Invoice"
@@ -108,11 +114,95 @@ def extract_entravision(text):
         # Add global details
         item['invoice_no'] = invoice_no
         item['billing_period'] = billing_period
-        item['rate'] = 13.5
+        item['rate'] = 14.68
         item['impressions'] = 0
 
     
     return items
+
+
+def extract_meta(uploaded_file):
+    # Save the uploaded file temporarily
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+        tmp_file.write(uploaded_file.getvalue())
+        tmp_file_path = tmp_file.name
+
+    os.environ["LLAMA_CLOUD_API_KEY"] = "llx-Fp3v41R8OeEuNppKkJLh5ihZxLjqgdPsih0BR8BkrzGtjbfV"
+    text = LlamaParse(result_type="markdown").load_data(tmp_file_path)
+    invoice_text= text[0].text
+    print(invoice_text)
+    
+
+    # Regex patterns for Invoice # and Invoice Date
+    invoice_number_pattern = r"Invoice #:\s*(\d+)"
+    invoice_date_pattern = r"Invoice Date:\s*(\d{2}-\w{3}-\d{4})"
+
+    # Find Invoice # and Invoice Date
+    invoice_number = re.search(invoice_number_pattern, invoice_text).group(1)
+    invoice_date = re.search(invoice_date_pattern, invoice_text).group(1)
+
+    # Regex pattern to match line items and amounts
+    line_item_pattern = r"^\|\d+\|([^|]+)\|([-\d,.]+)\|$"
+
+    # Find all matches in the text
+    matches = re.findall(line_item_pattern, invoice_text, re.MULTILINE)
+
+    # Creating a list of dictionaries from matches
+    line_items = []
+    coupon_sum = 0.0  # To sum amounts of coupon line items
+    max_amount = float('-inf')  # Start with the lowest possible float
+    max_item_index = -1  # To keep track of the item with the largest amount
+
+    for index, (item_desc, amount_str) in enumerate(matches):
+        # Convert amount to a float, handling comma as thousands separator
+        amount = float(amount_str.replace(',', ''))
+        
+        item = {
+            'item_line': item_desc.strip(),
+            'usd': amount,
+            'invoice_no': invoice_number,
+            'billing_period': invoice_date,
+            'rate': '13.5',
+            'impressions': '0',
+            'platform': 'Meta'
+        }
+        # Determine the brand based on line item description
+        if 'GHA_BRD_CLBB' in item_desc:
+            item['brand'] = 'Club Beer'
+        elif 'BRD_CLBB' in item_desc:
+            item['brand'] = 'Club Beer'
+        elif 'BRD_CLBS' in item_desc:
+            item['brand'] = 'Club Shandy'
+        elif 'BRD_BUD' in item_desc:
+            item['brand'] = 'Budweiser'
+        elif 'BRD_BTM' in item_desc:
+            item['brand'] = 'Beta Malt'            
+        
+        # Check if line item contains 'Coupons: goodwill/bugs'
+        if 'Coupons: goodwill/bugs' in item_desc:
+            coupon_sum += amount  # Sum the negative amounts
+
+        # Track the maximum amount and index
+        if amount > max_amount:
+            max_amount = amount
+            max_item_index = index
+
+        line_items.append(item)
+
+    # After collecting all items, add the coupon sum to the item with the largest amount
+    if max_item_index != -1:  # Ensure there was at least one positive amount item
+        line_items[max_item_index]['usd'] += coupon_sum
+
+    # Clean up temporary file after processing
+    os.remove(tmp_file_path)
+
+    # Remove coupon line items from the list
+    line_items = [item for item in line_items if 'Coupons: goodwill/bugs' not in item['item_line']]
+
+   
+    print(invoice_text)    
+    return line_items
+
 
 def extract_twitter(text):
     # Extract Invoice Date and Invoice Number , he exchange rate between GBP and USD using regex
@@ -198,6 +288,8 @@ def extract_eskimi(text):
         brand = 'Club Shandy'
     elif 'club beer' in item_line_lower:
         brand = 'Club Beer'
+    elif 'budweiser' in item_line_lower:
+        brand = 'Budweiser'        
     else:
         brand = 'Unknown'  # Default value if no known brand is found
 
@@ -232,6 +324,10 @@ def extract_eskimi(text):
     })    
 
     return all_rows
+
+
+
+
 
 
 #_--------
@@ -410,7 +506,7 @@ def excel_recons(data):
     sheet['G13'] = data.get('ghc', 0)
     
     # Save the workbook with a new name based on the dictionary values
-    filename = f"{data.get('brand', 'Unknown')}_{data.get('item_line', 'Unknown')}_{data.get('platform', 'Unknown')}_{data.get('invoice_no', 'UnknownInv')}_Recons.xlsx"
+    filename = f"{data.get('brand', 'Unknown')}_{data.get('item_line', 'Unknown')}_{data.get('platform', 'Unknown')}_Recons.xlsx"
     filename = sanitize_filename(filename)
     workbook.save(filename)
     
@@ -473,6 +569,18 @@ def main():
                 #print(result)
                 #all_results.extend(result)
 
+            elif platform_type == 'Meta':
+                #Get text from llamaIndexAPI
+                result= extract_meta(uploaded_file)
+                all_results.extend(result)
+                #print(result)
+
+
+
+
+                #print(result)
+                #all_results.extend(result)            
+
             elif platform_type == 'Twitter':
                 result = extract_twitter(text)
                 #print(result)
@@ -495,11 +603,17 @@ def main():
         print('------       ---------')
         format_checker(all_results)
         all_results = convert_numbers_to_float(all_results)
+        print('Converted numbers-->', all_results)
         all_results = process_item_lines(all_results)
+        print('Processed-->', all_results)
         all_results = collapser(all_results)
+        print('Collapse-->', all_results)
         all_results = tax_gen(all_results)
+        print('TAXED-->', all_results)
+
         print('         ')
-        print('------  Processed ---------')
+        print('         ')
+        print('------  FINAL Processed ---------')
         print(all_results)
         print('------       ---------')        
 
@@ -510,7 +624,7 @@ def main():
             excel_recons(result)  # This saves the file directly
             
             sanitized_item_line = sanitize_filename(result.get('item_line', 'Unknown'))
-            excel_file_name = f"{result.get('brand', 'Unknown')}_{sanitized_item_line}_{result.get('platform', 'Unknown')}_{result.get('invoice_no', 'UnknownInv')}_Recons.xlsx"            
+            excel_file_name = f"{result.get('brand', 'Unknown')}_{sanitized_item_line}_{result.get('platform', 'Unknown')}_Recons.xlsx"            
             # Now, read the saved Excel file into memory
             try:
                 with open(excel_file_name, "rb") as excel_file:
